@@ -2,9 +2,9 @@ import pytest
 
 from risk_guard.broker import FakeBroker
 from risk_guard.config import LiveTradingRefused, RiskConfig
-from risk_guard.executor import evaluate, execute
-from risk_guard.guardian import Status, run_guard
-from risk_guard.models import Direction, OpenOrder, TradeIdea
+from risk_guard.executor import evaluate, execute, protective_stops
+from risk_guard.guardian import Status, inspect_position, run_guard
+from risk_guard.models import Direction, OpenOrder, Position, TradeIdea
 from risk_guard.report import build_report
 
 CFG = RiskConfig()
@@ -77,6 +77,18 @@ class TestExecutor:
         tiny = TradeIdea("PENNY", Direction.LONG, 5.0, 4.98, 5.10)
         assert "friction" in evaluate(tiny, broker, CFG).reason
 
+    def test_protective_stops_ignores_wrong_action(self, broker):
+        broker.add_position("XYZ", 10, 50.0)  # LONG -> exit action is SELL
+        broker.add_order(OpenOrder("XYZ", "BUY", "STP", 10, 45.0, 1))  # BUY stop is not exit protection
+        stops = protective_stops(broker)
+        assert "XYZ" not in stops
+
+    def test_protective_stops_normalizes_casing(self, broker):
+        broker.add_position("xyz", 10, 50.0)
+        broker.add_order(OpenOrder("XYZ", "SELL", "STP", 10, 45.0, 1))
+        stops = protective_stops(broker)
+        assert stops.get("XYZ") == 45.0
+
 
 class TestGuardian:
     def test_all_protected(self, broker):
@@ -135,6 +147,29 @@ class TestGuardian:
     def test_short_position(self, broker):
         protected(broker, "XYZ", 10, 50.0, 40.0, action="BUY")
         assert run_guard(broker).all_protected
+
+    def test_detects_incoherent_second_stop(self, broker):
+        broker.add_position("XYZ", 10, 44)
+        broker.add_order(OpenOrder("XYZ", "SELL", "STP", 5, 40.0, 1))  # coherent
+        broker.add_order(OpenOrder("XYZ", "SELL", "STP", 5, 88.0, 2))  # incoherent (above market $45.94)
+        broker.add_order(OpenOrder("XYZ", "SELL", "LMT", 10, 96.0, 3))
+        assert run_guard(broker).findings[0].status is Status.INCOHERENT_STOP
+
+    def test_inspect_position_zero_quantity(self):
+        f = inspect_position(Position("XYZ", 0, 50.0), [])
+        assert f.status is Status.OK and "closed" in f.detail
+
+    def test_exits_for_case_insensitive(self, broker):
+        broker.add_position("xyz", 5, 180)
+        broker.add_order(OpenOrder("XYZ", "SELL", "STP", 5, 170, 1))
+        broker.add_order(OpenOrder("XYZ", "SELL", "LMT", 5, 200, 2))
+        assert run_guard(broker).all_protected
+
+    def test_repair_case_insensitive_stored_levels(self, broker):
+        broker.add_position("XYZ", 18, 44)
+        broker.add_order(OpenOrder("XYZ", "SELL", "STP", 9, 40.0, 3))
+        [f] = run_guard(broker, {"xyz": (41.0, 50.0)}, repair=True).findings
+        assert f.action.startswith("repaired")
 
 
 class TestReport:

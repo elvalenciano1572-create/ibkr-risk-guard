@@ -94,8 +94,41 @@ class TestFriction:
         assert "lower bound" in msg
 
 
+def test_open_risk_ignores_zero_quantity_positions():
+    positions = [Position("A", 10, 100), Position("CLOSED", 0, 50)]
+    total, missing = open_risk_usd(positions, {"A": 95})
+    assert total == 50
+    assert missing == []
+
+
+def test_open_risk_case_insensitive():
+    positions = [Position("aapl", 10, 100)]
+    total, missing = open_risk_usd(positions, {"AAPL": 95})
+    assert total == 50
+    assert missing == []
+
+
 def test_config_validation():
     with pytest.raises(ValueError):
         RiskConfig(risk_per_trade_pct=0)
     with pytest.raises(ValueError):
         RiskConfig(risk_per_trade_pct=0.1, max_portfolio_risk_pct=0.05)
+
+
+def test_portfolio_caps_non_positive_nav():
+    ok, msg = check_portfolio_caps(100, 1_000, 0, 0, 0, CFG)
+    assert not ok and "NAV must be positive" in msg
+    ok, msg = check_portfolio_caps(100, 1_000, -500, 0, 0, CFG)
+    assert not ok and "NAV must be positive" in msg
+
+
+def test_friction_zero_expected_edge():
+    cfg = RiskConfig(expected_edge_r=0.0)
+    ok, msg = check_friction(risk_usd=100, quantity=10, spread_usd=0.01, cfg=cfg)
+    assert not ok and "expected edge must be positive" in msg
+
+
+def test_sizing_non_positive_entry():
+    s = size_position(TradeIdea("A", Direction.LONG, 0.0, -1.0, 1.0), nav=10_000, cfg=CFG)
+    assert s.quantity == 0
+    assert "entry price" in s.reason

@@ -28,7 +28,17 @@ log = logging.getLogger(__name__)
 
 def protective_stops(broker: Broker) -> dict[str, float]:
     """Map symbol -> live stop price, read from the broker's open STP orders."""
-    return {o.symbol: o.price for o in broker.open_orders() if o.order_type == "STP"}
+    pos_map = {p.symbol.upper(): p for p in broker.positions() if p.quantity != 0}
+    stops: dict[str, float] = {}
+    for o in broker.open_orders():
+        if o.order_type != "STP":
+            continue
+        sym = o.symbol.upper()
+        pos = pos_map.get(sym)
+        if pos is not None and o.action != pos.direction.exit_action:
+            continue
+        stops[sym] = o.price
+    return stops
 
 
 def evaluate(idea: TradeIdea, broker: Broker, cfg: RiskConfig) -> Decision:

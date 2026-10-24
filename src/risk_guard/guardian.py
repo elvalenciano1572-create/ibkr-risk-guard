@@ -63,11 +63,14 @@ class GuardReport:
 
 def _exits_for(position: Position, orders: list[OpenOrder]) -> tuple[list[OpenOrder], list[OpenOrder]]:
     action = position.direction.exit_action
-    mine = [o for o in orders if o.symbol == position.symbol and o.action == action]
+    pos_sym = position.symbol.upper()
+    mine = [o for o in orders if o.symbol.upper() == pos_sym and o.action == action]
     return [o for o in mine if o.order_type == "STP"], [o for o in mine if o.order_type == "LMT"]
 
 
 def inspect_position(position: Position, orders: list[OpenOrder], price: float | None = None) -> Finding:
+    if position.quantity == 0:
+        return Finding(position.symbol, Status.OK, "0 shares (closed)")
     stops, targets = _exits_for(position, orders)
     qty = abs(position.quantity)
     if not stops and not targets:
@@ -76,9 +79,10 @@ def inspect_position(position: Position, orders: list[OpenOrder], price: float |
         # A live stop on the wrong side of the market is the most dangerous state of all.
         far = Direction.LONG if position.quantity > 0 else Direction.SHORT
         dummy_target = price * (2 if far is Direction.LONG else 0.5)
-        ok, why = levels_coherent(far, stops[0].price, dummy_target, price)
-        if not ok:
-            return Finding(position.symbol, Status.INCOHERENT_STOP, why)
+        for s in stops:
+            ok, why = levels_coherent(far, s.price, dummy_target, price)
+            if not ok:
+                return Finding(position.symbol, Status.INCOHERENT_STOP, why)
     if not stops:
         return Finding(position.symbol, Status.MISSING_STOP, "target present but no stop")
     if not targets:
@@ -102,7 +106,7 @@ def run_guard(
 ) -> GuardReport:
     """Inspect every position; optionally repair using `stored_levels[symbol] = (stop, target)`."""
     assert_paper_account(broker.account().account_id)
-    stored_levels = stored_levels or {}
+    stored_levels_map = {k.upper(): v for k, v in (stored_levels or {}).items()}
     orders = broker.open_orders()
     report = GuardReport()
 
@@ -114,7 +118,7 @@ def run_guard(
         if finding.ok or not repair:
             continue
 
-        levels = stored_levels.get(pos.symbol)
+        levels = stored_levels_map.get(pos.symbol.upper())
         if levels is None:
             finding.action = "manual: no stored levels to rebuild protection from"
             continue

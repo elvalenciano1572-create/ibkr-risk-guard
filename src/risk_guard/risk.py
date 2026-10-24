@@ -35,6 +35,8 @@ def size_position(idea: TradeIdea, nav: float, cfg: RiskConfig) -> Sizing:
     """
     if nav <= 0:
         return Sizing(0, 0.0, 0.0, "NAV must be positive")
+    if idea.entry <= 0:
+        return Sizing(0, 0.0, 0.0, "entry price must be positive")
     per_share = idea.risk_per_share
     if per_share <= 0:
         return Sizing(0, 0.0, 0.0, "stop distance must be positive")
@@ -78,10 +80,14 @@ def open_risk_usd(positions: list[Position], stops: dict[str, float]) -> tuple[f
     """
     total = 0.0
     missing: list[str] = []
+    stops_upper = {k.upper(): v for k, v in stops.items()}
     for p in positions:
-        stop = stops.get(p.symbol)
+        if p.quantity == 0:
+            continue
+        sym = p.symbol.upper()
+        stop = stops_upper.get(sym)
         if stop is None:
-            missing.append(p.symbol)
+            missing.append(sym)
             continue
         # A stop beyond the entry (locked-in profit) carries no downside risk.
         per_share = (p.avg_cost - stop) if p.quantity > 0 else (stop - p.avg_cost)
@@ -102,6 +108,8 @@ def check_portfolio_caps(
     Individually-correct trades can add up to a dangerous book (the original system once
     reached 214% gross exposure one sensible trade at a time). Unknown state -> reject.
     """
+    if nav <= 0:
+        return False, "NAV must be positive: refusing to add exposure"
     if current_open_risk_usd is None:
         return False, "open portfolio risk unknown: refusing to add exposure"
     if current_gross_usd is None:
@@ -140,6 +148,8 @@ def check_friction(
     if risk_usd <= 0 or quantity <= 0:
         return False, "invalid trade size"
     edge = cfg.expected_edge_r * risk_usd
+    if edge <= 0:
+        return False, "expected edge must be positive"
     cost = cfg.round_trip_commission_usd
     note = ""
     if spread_usd is not None and spread_usd > 0:
