@@ -65,7 +65,7 @@ suite runs in well under a second without TWS.
 ## Quick start
 
 ```bash
-git clone https://github.com/OWNER/ibkr-risk-guard && cd ibkr-risk-guard
+git clone https://github.com/elvalenciano1572-create/ibkr-risk-guard && cd ibkr-risk-guard
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 pytest
@@ -82,6 +82,36 @@ risk-guard check AAPL LONG 190 185 200 --send   # places the bracket on the pape
 risk-guard guard                                # audit protection, exit code 1 if anything is wrong
 risk-guard report                               # print the daily report
 risk-guard report --send                        # email it (SMTP_* env vars)
+```
+
+## Example output
+
+Running `risk-guard demo` exercises the full decision pipeline offline:
+
+```text
+== Normal long: APPROVED - all checks passed
+   - levels form a valid bracket
+   - no existing position or working orders
+   - sizing: 7 shares, $35.00 at risk, $1330.00 notional
+   - portfolio caps OK: risk 0.9%/8%, gross 34%/200%
+   - friction OK: costs $0.87 vs expected edge $3.50 = 25% of edge
+   - levels coherent with market $190.00
+   - dry run: would send BUY 7 AAPL @ 190.00 LMT, stop 185.00 / target 200.00 (GTC, OCA rg-AAPL-23bd6844)
+
+== Duplicate: REJECTED - duplicate: already holding MSFT
+== Tiny risk (friction): REJECTED - rejected on friction: costs $5.30 vs expected edge $0.60 = 883% of edge
+== Broken levels: REJECTED - invalid idea: LONG requires stop < entry < target
+
+== Daily report (dry run)
+Subject: [ACTION NEEDED] risk-guard 2026-10-24: NAV $10,000.00, 1 of 2 positions need attention
+Account     DU0000001 (paper)
+NAV         $10,000.00
+Gross       $2,056.20  (0.21x)
+Positions   2
+
+Protection
+  ok MSFT   OK              3 shares, stop and target live
+  !! XYZ    INCOHERENT_STOP sell stop $88.06 is at/above market $45.90: would fire now
 ```
 
 ## Design decisions
